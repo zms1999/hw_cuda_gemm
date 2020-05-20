@@ -293,7 +293,8 @@ void run()
         printf("preprocessed\n");
     }
 
-
+    double speedup =  t_base / t_hw;
+    printf("speedup %f\n", speedup);
      
 }
 
