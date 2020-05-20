@@ -3,54 +3,94 @@
 #include "util.h"
 #include <algorithm>
 
-#define BLOCK_SIZE 32
+#define BLOCK_SIZE 8
 
 template<class T>
 __global__ void mygemm(T *A, T *B, T *C, int m, int n, int k, T alpha, T beta) {
-    int col = blockIdx.x * blockDim.x + threadIdx.x;
-    int row = blockIdx.y * blockDim.y + threadIdx.y;
+    int col = blockIdx.x * blockDim.x * 4 + threadIdx.x;
+    int row = blockIdx.y * blockDim.y * 4 + threadIdx.y;
+
+    __shared__ T local_A[BLOCK_SIZE*4][BLOCK_SIZE*4];        
+    __shared__ T local_B[BLOCK_SIZE*4][BLOCK_SIZE*4];
 
 
     if( !((col >= n) && (row >= m)) )
     {
-        T tmp = 0;
+        T tmp[4][4] = {static_cast<T>0.0};
+        T reg_A[4],reg_B[4];
         
-        int step = (k + BLOCK_SIZE - 1) / BLOCK_SIZE;
-        int kmod = k % BLOCK_SIZE;
-        int offset_A = row * k + threadIdx.x;
-        int offset_B = threadIdx.y * n + col;
-        int nB = n * BLOCK_SIZE;
-        for(int i = 0;i < step - 1; ++i, offset_A += BLOCK_SIZE, offset_B += nB) {
-            __shared__ T local_A[BLOCK_SIZE][BLOCK_SIZE];
-            __shared__ T local_B[BLOCK_SIZE][BLOCK_SIZE];
-            local_A[threadIdx.y][threadIdx.x] = A[offset_A];
-            local_B[threadIdx.y][threadIdx.x] = B[offset_B];
+        int step = (k + BLOCK_SIZE * 4 - 1) / (BLOCK_SIZE * 4);
+        int kmod = k % (BLOCK_SIZE * 4);
+        for(int i = 0;i < step - 1; ++i) {
+            #pragma unroll
+            for(int s1 = 0; s1 < 4; ++s1)
+                #pragma unroll
+                for(int s2 = 0; s2 < 4; ++ s2) {
+                    local_A[s1 * 4 + threadIdx.y][s2 * 4 + threadIdx.x] = A[(row + s1 * BLCOK_SIZE) * k + threadIdx.x + i * BLOCK_SIZE * 4 + BLOCK_SIZE * s2];
+                    local_B[s1 * 4 + threadIdx.y][s2 * 4 + threadIdx.x] = B[(i * BLOCK_SIZE * 4 + BLOCK_SIZE * s2 + threadIdx.y) * n + col + BLOCK_SIZE * s1];
+                }
 
             __syncthreads();
 
             if(col < n && row < m)
-                for(int l = 0; l < BLOCK_SIZE; ++l)
-                    tmp += local_A[threadIdx.y][l] * local_B[l][threadIdx.x];
+                for(int l = 0; l < BLOCK_SIZE * 4; ++l) {
+                    T reg_tmp[4][4] = {static_cast<T>0.0};
+                    
+                    #pragma unroll
+                    for(int s1 = 0; s1 < 4; ++s1) {
+                        reg_A[s1] = local_A[threadIdx.y + s1 * 4][l];
+                        reg_B[s1] = local_B[l][thraedIdx.x + s1 * 4];
+                    }
+                    
+                    #pragma unroll
+                    for(int s1 = 0; s1 < 4; ++s1)
+                        #pragma unroll
+                        for(int s2 = 0; s2 < 4; ++s2) {
+                            tmp[s1][s2] += reg_A[s1] * reg_B[s2];
+                        }
+
+                }
 
             __syncthreads();
         }
-        __shared__ T local_A[BLOCK_SIZE][BLOCK_SIZE];
-        __shared__ T local_B[BLOCK_SIZE][BLOCK_SIZE];
-        
-        local_A[threadIdx.y][threadIdx.x] = A[row * k + (step - 1) * BLOCK_SIZE + threadIdx.x];
-        local_B[threadIdx.y][threadIdx.x] = B[((step - 1) * BLOCK_SIZE + threadIdx.y) * n + col];
-        
-        int len = BLOCK_SIZE;
+        int i = step - 1;
+        #pragma unroll
+        for(int s1 = 0; s1 < 4; ++s1)
+            #pragma unroll
+            for(int s2 = 0; s2 < 4; ++ s2) {
+                local_A[s1 * 4 + threadIdx.y][s2 * 4 + threadIdx.x] = A[(row + s1 * BLCOK_SIZE) * k + threadIdx.x + i * BLOCK_SIZE * 4 + BLOCK_SIZE * s2];
+                local_B[s1 * 4 + threadIdx.y][s2 * 4 + threadIdx.x] = B[(i * BLOCK_SIZE * 4 + BLOCK_SIZE * s2 + threadIdx.y) * n + col + BLOCK_SIZE * s1];
+            }
+
+        int len = BLOCK_SIZE * 4;
         if(kmod) len = kmod;
         
         __syncthreads();
 
         
         if(col < n && row < m)
-            for(int l = 0; l < len; ++l)
-                tmp += local_A[threadIdx.y][l] * local_B[l][threadIdx.x];
+            for(int l = 0; l < BLOCK_SIZE * 4; ++l) {
+                T reg_tmp[4][4] = {static_cast<T>0.0};
 
-        if( col < n && row < m) C[row * n + col] = tmp * alpha + beta * C[row * n + col];
+                #pragma unroll
+                for(int s1 = 0; s1 < 4; ++s1) {
+                    reg_A[s1] = local_A[threadIdx.y + s1 * 4][l];
+                    reg_B[s1] = local_B[l][thraedIdx.x + s1 * 4];
+                }
+
+                #pragma unroll
+                for(int s1 = 0; s1 < 4; ++s1)
+                    #pragma unroll
+                    for(int s2 = 0; s2 < 4; ++s2) {
+                        tmp[s1][s2] += reg_A[s1] * reg_B[s2];
+                    }
+
+            }
+
+        for(int s1 = 0; s1 < 4; ++s1)
+            for(int s2 = 0; s2 < 4; ++s2)
+                if( col + BLOCK_SIZE * s1 < n && row + BLOCK_SIZE * s2 < m)
+                    C[(row + BLOCK_SIZE * s1) * n + col + BLOCK_SIZE * s2] = tmp[s1][s2] * alpha + beta * C[(row + BLOCK_SIZE * s1) * n + col + BLOCK_SIZE * s2];
     }
 }
 
@@ -73,7 +113,7 @@ double myGEMM(T* A, T* B, T* C, T alpha, T beta)
     {
         // your gemm
         dim3 block(BLOCK_SIZE,BLOCK_SIZE);
-        dim3 grid( (N + block.x - 1) / block.x, (M + block.y - 1) / block.y );
+        dim3 grid( (N + block.x * 4 - 1) / (block.x * 4), (M + block.y * 4- 1) / (block.y * 4) );
         timestamp(t0);
         //        mygemm <<<grid, block, (DIM_THREAD_BLOCK_X + DIM_THREAD_BLOCK_Y) * K * sizeof(T)>>>
         mygemm <<<grid, block>>>
