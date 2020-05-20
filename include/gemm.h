@@ -7,15 +7,27 @@
 
 template<class T>
 __global__ void mygemm(T *A, T *B, T *C, int m, int n, int k, T alpha, T beta) {
+    __shared__ T local_A[blockDim.y * k];
+    __shared__ T local_B[blockDim.x * k];
     int col = blockIdx.x * blockDim.x + threadIdx.x;
     int row = blockIdx.y * blockDim.y + threadIdx.y;
+    if( threadIdx.x == 0 ) {
+        for(int i = 0; i < k; ++i)
+            local_A[ threadIdx.y * k + i] = A[row * k + i];
+    }
+    if( threadId.y == 0) {
+        for(int i = 0; i < k; ++i)
+            local_B[ i * n + threadIdx.x ] = B[ col + i * n];
+    }
+    __syncthreads();
+
     // printf("col %d row %d\n", col, row);
     if( (col < n) && (row < m) )
     {
         T tmp = beta * C[row * n + col];
         for(int i = 0; i < k; ++i)
         {
-            tmp += alpha * A[row * k + i] * B[col + i * n];
+            tmp += alpha * local_A[threadIdx.y * k + i] * B[threadIdx.x + i * n];
         }
         C[row * n + col] = tmp;
     }
