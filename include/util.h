@@ -68,6 +68,7 @@ int validate(T* d1, T* d2, size_t size)
     diff_num = 0;
     validate_kernel<<< (size + 255)/256, 256 >>>(d1, d2, size, &diff_num);
     checkCudaErrors(cudaDeviceSynchronize());
+
     return diff_num;
 }
 

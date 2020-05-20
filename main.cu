@@ -216,7 +216,31 @@ void run()
 
     myGEMM(A, B, C, alpha, beta);
     checkCudaErrors(cudaDeviceSynchronize());
-    
+/*
+    T *_A,*_B,*_C,*_C_gold;
+    _A = new T(M * K);
+    checkCudaErrors(cudaMemcpy(_A, A, M * K * sizeof(T), cudaMemcpyDeviceToHost));
+    _B = new T[K * N];
+    checkCudaErrors(cudaMemcpy(_B, B, K * N * sizeof(T), cudaMemcpyDeviceToHost));
+    _C = new T[M * N];
+    checkCudaErrors(cudaMemcpy(_C, C, M * N * sizeof(T), cudaMemcpyDeviceToHost));
+    _C_gold = new T[M * N];
+    checkCudaErrors(cudaMemcpy(_C_gold, C_gold, M * N * sizeof(T), cudaMemcpyDeviceToHost));
+
+    for(int i = 0; i < M; ++i, puts(""))
+        for(int j = 0; j < N; ++j)
+            std::cout<< C_gold[i * N + j] << " ";
+    for(int i = 0; i < M; ++i, puts(""))
+        for(int j = 0; j < N; ++j)
+            std::cout<< C[i * N + j] << " ";
+    for(int i = 0; i < M; ++i, puts(""))
+        for(int j = 0; j < K; ++j)
+            std::cout<< A[i * K + j] << " ";
+    for(int i = 0; i < K; ++i, puts(""))
+        for(int j = 0; j < N; ++j)
+            std::cout<< B[i * N + j] << " ";
+    fflush(stdout);
+*/
     // baseline implementation which has right answer
     // dim3 block(DIM_THREAD_BLOCK_X, DIM_THREAD_BLOCK_Y);
     // dim3 grid( (N + block.x - 1) / block.x, (M + block.y - 1) / block.y );
