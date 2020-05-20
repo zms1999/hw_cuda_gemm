@@ -1,8 +1,12 @@
-// studentid: 2016123456
+// studentid: 2018013425
+// 翟明书 计82
 #include "util.h"
 
+#define DIM_THREAD_BLOCK_X 32
+#define DIM_THREAD_BLOCK_Y 8
+
 template<class T>
-__global__ void gemm(T *A, T *B, T *C, int m, int n, int k, T alpha, T beta) {
+__global__ void mygemm(T *A, T *B, T *C, int m, int n, int k, T alpha, T beta) {
     int col = blockIdx.x * blockDim.x + threadIdx.x;
     int row = blockIdx.y * blockDim.y + threadIdx.y;
     // printf("col %d row %d\n", col, row);
@@ -38,7 +42,7 @@ double myGEMM(T* A, T* B, T* C, T alpha, T beta)
         dim3 block(DIM_THREAD_BLOCK_X, DIM_THREAD_BLOCK_Y);
         dim3 grid( (N + block.x - 1) / block.x, (M + block.y - 1) / block.y );
         timestamp(t0);
-        gemm <<<grid, block>>>
+        mygemm <<<grid, block>>>
             (A, B, C, M, N, K, alpha, beta);
 
 		checkCudaErrors(cudaDeviceSynchronize());
