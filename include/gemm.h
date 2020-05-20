@@ -2,34 +2,34 @@
 // 翟明书 计82
 #include "util.h"
 
-#define DIM_THREAD_BLOCK_X 32
-#define DIM_THREAD_BLOCK_Y 8
+#define BLOCK_SIZE 32
 
 template<class T>
 __global__ void mygemm(T *A, T *B, T *C, int m, int n, int k, T alpha, T beta) {
-    __shared__ T local_A[blockDim.y * k];
-    __shared__ T local_B[blockDim.x * k];
     int col = blockIdx.x * blockDim.x + threadIdx.x;
     int row = blockIdx.y * blockDim.y + threadIdx.y;
-    if( threadIdx.x == 0 ) {
-        for(int i = 0; i < k; ++i)
-            local_A[ threadIdx.y * k + i] = A[row * k + i];
-    }
-    if( threadId.y == 0) {
-        for(int i = 0; i < k; ++i)
-            local_B[ i * n + threadIdx.x ] = B[ col + i * n];
-    }
-    __syncthreads();
 
-    // printf("col %d row %d\n", col, row);
+    __shared__ T local_A[BLOCK_SIZE][BLOCK_SIZE];
+    __shared__ T local_B[BLOCK_SIZE][BLOCK_SIZE];
+
     if( (col < n) && (row < m) )
     {
-        T tmp = beta * C[row * n + col];
-        for(int i = 0; i < k; ++i)
-        {
-            tmp += alpha * local_A[threadIdx.y * k + i] * B[threadIdx.x + i * n];
+        T tmp = 0;
+        
+        int step = (k + BLOCK_SIZE - 1) / BLOCK_SIZE;
+        for(int i = 0;i < step; ++i) {
+            local_A[threadIdx.y][threadIdx.x] = A[row * k + i * BLOCK_SIZE + threadIdx.x];
+            local_B[threadIdx.y][threadIdx.x] = B[(i * BLOCK_SIZE + threadIdx.y) * n + col];
+
+            __syncthreads();
+
+            for(int l = 0; l < BLOCK_SIZE; ++l)
+                tmp += local_A[threadIdx.y][l] * local_B[l][threadIdx.x];
+
+            __syncthreads();
         }
-        C[row * n + col] = tmp;
+        
+        C[row * n + col] = tmp * alpha + beta * C[row * n + col];
     }
 }
 
@@ -51,9 +51,10 @@ double myGEMM(T* A, T* B, T* C, T alpha, T beta)
 	else
 	{
 		// your gemm
-        dim3 block(DIM_THREAD_BLOCK_X, DIM_THREAD_BLOCK_Y);
+        dim3 block(BLOCK_SIZE,BLOCK_SIZE);
         dim3 grid( (N + block.x - 1) / block.x, (M + block.y - 1) / block.y );
         timestamp(t0);
+//        mygemm <<<grid, block, (DIM_THREAD_BLOCK_X + DIM_THREAD_BLOCK_Y) * K * sizeof(T)>>>
         mygemm <<<grid, block>>>
             (A, B, C, M, N, K, alpha, beta);
 
