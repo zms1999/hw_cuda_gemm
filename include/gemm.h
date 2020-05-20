@@ -16,30 +16,29 @@ __global__ void mygemm(T *A, T *B, T *C, int m, int n, int k, T alpha, T beta) {
 
     if( !((col >= n) && (row >= m)) )
     {
-        T tmp[4][4] = {static_cast<T>0.0};
+        T tmp[4][4] = {static_cast<T>(0.0)};
         T reg_A[4],reg_B[4];
         
         int step = (k + BLOCK_SIZE * 4 - 1) / (BLOCK_SIZE * 4);
-        int kmod = k % (BLOCK_SIZE * 4);
         for(int i = 0;i < step - 1; ++i) {
             #pragma unroll
             for(int s1 = 0; s1 < 4; ++s1)
                 #pragma unroll
                 for(int s2 = 0; s2 < 4; ++ s2) {
-                    local_A[s1 * 4 + threadIdx.y][s2 * 4 + threadIdx.x] = A[(row + s1 * BLCOK_SIZE) * k + threadIdx.x + i * BLOCK_SIZE * 4 + BLOCK_SIZE * s2];
-                    local_B[s1 * 4 + threadIdx.y][s2 * 4 + threadIdx.x] = B[(i * BLOCK_SIZE * 4 + BLOCK_SIZE * s2 + threadIdx.y) * n + col + BLOCK_SIZE * s1];
+                    local_A[s1 * BLOCK_SIZE + threadIdx.y][s2 * BLOCK_SIZE + threadIdx.x] = A[(row + s1 * BLOCK_SIZE) * k + threadIdx.x + i * BLOCK_SIZE * 4 + BLOCK_SIZE * s2];
+                    local_B[s1 * BLOCK_SIZE + threadIdx.y][s2 * BLOCK_SIZE + threadIdx.x] = B[(i * BLOCK_SIZE * 4 + BLOCK_SIZE * s1 + threadIdx.y) * n + col + BLOCK_SIZE * s2];
                 }
-
+            
             __syncthreads();
 
             if(col < n && row < m)
+                #pragma unroll
                 for(int l = 0; l < BLOCK_SIZE * 4; ++l) {
-                    T reg_tmp[4][4] = {static_cast<T>0.0};
                     
                     #pragma unroll
                     for(int s1 = 0; s1 < 4; ++s1) {
-                        reg_A[s1] = local_A[threadIdx.y + s1 * 4][l];
-                        reg_B[s1] = local_B[l][thraedIdx.x + s1 * 4];
+                        reg_A[s1] = local_A[threadIdx.y + s1 * BLOCK_SIZE][l];
+                        reg_B[s1] = local_B[l][threadIdx.x + s1 * BLOCK_SIZE];
                     }
                     
                     #pragma unroll
@@ -53,15 +52,16 @@ __global__ void mygemm(T *A, T *B, T *C, int m, int n, int k, T alpha, T beta) {
 
             __syncthreads();
         }
+        
         int i = step - 1;
         #pragma unroll
         for(int s1 = 0; s1 < 4; ++s1)
             #pragma unroll
             for(int s2 = 0; s2 < 4; ++ s2) {
-                local_A[s1 * 4 + threadIdx.y][s2 * 4 + threadIdx.x] = A[(row + s1 * BLCOK_SIZE) * k + threadIdx.x + i * BLOCK_SIZE * 4 + BLOCK_SIZE * s2];
-                local_B[s1 * 4 + threadIdx.y][s2 * 4 + threadIdx.x] = B[(i * BLOCK_SIZE * 4 + BLOCK_SIZE * s2 + threadIdx.y) * n + col + BLOCK_SIZE * s1];
+                local_A[s1 * BLOCK_SIZE + threadIdx.y][s2 * BLOCK_SIZE + threadIdx.x] = A[(row + s1 * BLOCK_SIZE) * k + threadIdx.x + i * BLOCK_SIZE * 4 + BLOCK_SIZE * s2];
+                local_B[s1 * BLOCK_SIZE + threadIdx.y][s2 * BLOCK_SIZE + threadIdx.x] = B[(i * BLOCK_SIZE * 4 + BLOCK_SIZE * s1 + threadIdx.y) * n + col + BLOCK_SIZE * s2];
             }
-
+        int kmod = k % (BLOCK_SIZE * 4);
         int len = BLOCK_SIZE * 4;
         if(kmod) len = kmod;
         
@@ -69,13 +69,12 @@ __global__ void mygemm(T *A, T *B, T *C, int m, int n, int k, T alpha, T beta) {
 
         
         if(col < n && row < m)
-            for(int l = 0; l < BLOCK_SIZE * 4; ++l) {
-                T reg_tmp[4][4] = {static_cast<T>0.0};
+            for(int l = 0; l < len; ++l) {
 
                 #pragma unroll
                 for(int s1 = 0; s1 < 4; ++s1) {
-                    reg_A[s1] = local_A[threadIdx.y + s1 * 4][l];
-                    reg_B[s1] = local_B[l][thraedIdx.x + s1 * 4];
+                    reg_A[s1] = local_A[threadIdx.y + s1 * BLOCK_SIZE][l];
+                    reg_B[s1] = local_B[l][threadIdx.x + s1 * BLOCK_SIZE];
                 }
 
                 #pragma unroll
@@ -86,11 +85,19 @@ __global__ void mygemm(T *A, T *B, T *C, int m, int n, int k, T alpha, T beta) {
                     }
 
             }
-
-        for(int s1 = 0; s1 < 4; ++s1)
-            for(int s2 = 0; s2 < 4; ++s2)
-                if( col + BLOCK_SIZE * s1 < n && row + BLOCK_SIZE * s2 < m)
+        if(col + BLOCK_SIZE * 3 < n && row + BLOCK_SIZE * 3 < m)
+            #pragma unroll
+            for(int s1 = 0; s1 < 4; ++s1)
+                #pragma unroll
+                for(int s2 = 0; s2 < 4; ++s2)
                     C[(row + BLOCK_SIZE * s1) * n + col + BLOCK_SIZE * s2] = tmp[s1][s2] * alpha + beta * C[(row + BLOCK_SIZE * s1) * n + col + BLOCK_SIZE * s2];
+        else 
+            #pragma unroll
+            for(int s1 = 0; s1 < 4; ++s1)
+                #pragma unroll
+                for(int s2 = 0; s2 < 4; ++s2)
+                    if( col + BLOCK_SIZE * s2 < n && row + BLOCK_SIZE * s1 < m)
+                        C[(row + BLOCK_SIZE * s1) * n + col + BLOCK_SIZE * s2] = tmp[s1][s2] * alpha + beta * C[(row + BLOCK_SIZE * s1) * n + col + BLOCK_SIZE * s2];
     }
 }
 
